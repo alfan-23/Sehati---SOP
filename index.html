@@ -336,19 +336,22 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     try {
-        // --- 1. INTEGRASI API KEY & DASHBOARD ---
+        // --- 1. INTEGRASI API KEY, MODEL & DASHBOARD ---
         const urlParams = new URLSearchParams(window.location.search);
         let apiKey = urlParams.get('key') || "";
+        let currentModel = urlParams.get('model') || "gemini-2.5-flash"; // Default model fallback
         
         window.addEventListener('message', (event) => {
-            if (event.data && event.data.type === 'UPDATE_API_KEY') {
+            if (event.data && event.data.type === 'UPDATE_CONFIG') {
                 apiKey = event.data.key;
-                console.log("SOP: Menerima API Key baru dari Dashboard.");
+                if (event.data.model) currentModel = event.data.model;
+                console.log(`[SOP App] Konfigurasi Diperbarui. Model: ${currentModel}`);
             }
         });
 
-        if (!apiKey && window.parent !== window) {
-            window.parent.postMessage({ type: 'REQUEST_API_KEY' }, '*');
+        // Minta konfigurasi ke Dashboard jika dimuat langsung tanpa parameter
+        if ((!apiKey || !currentModel) && window.parent !== window) {
+            window.parent.postMessage({ type: 'REQUEST_CONFIG' }, '*');
         }
 
         let listCounters = { alat: 0, petugas: 0, langkah: 0, revisi: 0 };
@@ -506,26 +509,27 @@ document.addEventListener('DOMContentLoaded', () => {
         
         document.getElementById('add-revisi-btn').addEventListener('click', () => addRevisionItem());
 
-        // --- 4. INTEGRASI GENERASI AI DENGAN ROTASI ERROR 429 ---
+        // --- 4. INTEGRASI GENERASI AI DENGAN ROTASI ERROR MULTI-MODEL ---
         async function fetchWithBackoff(url, options, maxRetries = 5) {
             const delays = [1000, 2000, 4000, 8000, 16000];
             for (let i = 0; i < maxRetries; i++) {
                 try {
                     const response = await fetch(url, options);
                     if (!response.ok) {
-                        // Jika kode 429 (Too Many Requests), lempar error khusus ke Dashboard
-                        if (response.status === 429) {
+                        // Jika model tidak ditemukan (404), kuota habis (429), akses ditolak (403), atau server error
+                        // maka lempar sinyal API_ERROR ke Dashboard agar Dashboard melakukan rotasi model/kunci.
+                        if (response.status === 429 || response.status === 404 || response.status === 403 || response.status >= 500) {
                              if (window.parent !== window) {
-                                  window.parent.postMessage({ type: 'API_ERROR', code: 429 }, '*');
+                                  window.parent.postMessage({ type: 'API_ERROR', code: response.status }, '*');
                              }
-                             throw new Error("QUOTA_EXCEEDED");
+                             throw new Error("API_FAIL_ROTATE");
                         }
                         const errorData = await response.json().catch(() => ({}));
                         throw new Error(errorData?.error?.message || `HTTP error! status: ${response.status}`);
                     }
                     return await response.json();
                 } catch (error) {
-                    if (error.message === "QUOTA_EXCEEDED") throw error; // Berhenti retry jika kuota habis
+                    if (error.message === "API_FAIL_ROTATE") throw error; // Hentikan retry, biarkan Dashboard yang merotasi
                     if (i === maxRetries - 1) throw error;
                     await new Promise(res => setTimeout(res, delays[i]));
                 }
@@ -551,7 +555,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const btnText = document.getElementById('ai-btn-text');
             const btnIcon = btn.querySelector('i');
             btn.disabled = true;
-            btnText.textContent = 'AI sedang memproses...';
+            btnText.textContent = `Memproses (${currentModel})...`;
             btnIcon.className = 'fas fa-spinner fa-spin';
             
             try {
@@ -563,7 +567,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 const payload = { contents: [{ role: "user", parts: [{ text: basePrompt }] }], generationConfig: { responseMimeType: "application/json" } };
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+                
+                // URL API dibuat dinamis berdasarkan currentModel yang diberikan oleh Dashboard
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
                 
                 const result = await fetchWithBackoff(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 
@@ -583,8 +589,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } catch (error) {
                 console.error(`AI Generation failed:`, error);
-                if (error.message === "QUOTA_EXCEEDED") {
-                    aiErrorEl.innerHTML = `<strong>Sistem Sedang Mengganti Kunci:</strong> Kuota API Key ini habis. Kunci cadangan telah diminta dari Dashboard... <br><br><em>Silakan klik tombol <strong>"Hasilkan Draf dengan AI"</strong> sekali lagi untuk melanjutkan.</em>`;
+                if (error.message === "API_FAIL_ROTATE") {
+                    aiErrorEl.innerHTML = `<strong>Kegagalan API Terdeteksi:</strong> Model atau Kuota saat ini tidak valid. Dashboard sedang menyiapkan konfigurasi cadangan... <br><br><em>Silakan klik <strong>"Hasilkan Draf dengan AI"</strong> sekali lagi.</em>`;
                 } else {
                     aiErrorEl.innerHTML = `Gagal menghubungi AI: ${error.message}<br>Coba lagi dalam beberapa saat.`;
                 }
