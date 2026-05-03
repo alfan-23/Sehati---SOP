@@ -4,17 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI SOP Generator (Baca File Otomatis)</title>
+    
+    <script>
+        (function() {
+            const allowedDomain = "alfan-23.github.io";
+            const currentDomain = window.location.hostname;
+            if (currentDomain !== allowedDomain && currentDomain !== "localhost" && currentDomain !== "127.0.0.1" && currentDomain !== "") {
+                document.documentElement.innerHTML = `<div style="text-align:center; margin-top:20%; font-family:sans-serif;"><h1>AKSES DITOLAK</h1><p>Gunakan Dashboard Resmi.</p></div>`;
+                throw new Error("Unauthorized Access");
+            }
+        })();
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Libraries for PDF & DOCX reading -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.5.1/mammoth.browser.min.js"></script>
     
-    <!-- Libraries for PDF generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
         body { 
             font-family: 'Inter', sans-serif; 
@@ -159,11 +167,10 @@
         @media print {
             body {
                 background-color: white;
-                font-family: 'Times New Roman', Times, serif; /* Font resmi isi tata naskah dinas */
+                font-family: 'Times New Roman', Times, serif; 
                 color: black;
             }
             
-            /* Sembunyikan area form dan elemen UI non-dokumen */
             .lg\:col-span-7, 
             #download-pdf-btn, 
             .text-2xl.font-bold.text-gray-800 {
@@ -186,13 +193,11 @@
                 border-radius: 0 !important;
             }
 
-            /* Pengaturan Kertas A4 & Margin Standar Naskah Dinas (Kiri 3cm, Atas/Bawah/Kanan 2cm) */
             @page {
                 size: A4 portrait;
                 margin: 2cm 2cm 2cm 3cm;
             }
 
-            /* Penyesuaian Tabel Kop agar lebih formal */
             .sop-header-table { 
                 border: 2pt solid black !important; 
                 margin-bottom: 1.5rem; 
@@ -204,14 +209,13 @@
                 color: black !important;
             }
 
-            /* Penyesuaian Judul dan Isi Konten */
             .sop-section-title { 
                 font-family: 'Arial', sans-serif;
                 font-size: 12pt; 
                 border-bottom: none;
                 margin-top: 14pt; 
                 margin-bottom: 4pt; 
-                page-break-after: avoid; /* Cegah judul terpisah dari isinya di halaman baru */
+                page-break-after: avoid; 
             }
 
             .sop-content { 
@@ -221,7 +225,7 @@
             }
 
             .sop-content table, .flowchart {
-                page-break-inside: avoid; /* Cegah tabel/bagan terpotong di tengah halaman */
+                page-break-inside: avoid; 
             }
             
             .sop-content table th, .sop-content table td {
@@ -229,7 +233,6 @@
                 color: black !important;
             }
 
-            /* Bersihkan warna latar pada flowchart agar tampak formal (hitam putih) */
             .flowchart-decision { background-color: transparent !important; border-color: black !important; }
             .flowchart-process { border-color: black !important; }
             .branch-label { background-color: transparent !important; border: 1pt solid black !important; }
@@ -239,7 +242,6 @@
 <body class="p-4 md:p-8">
 
     <div id="main-container" class="max-w-7xl mx-auto lg:grid lg:grid-cols-12 lg:gap-8">
-        <!-- INPUT FORM -->
         <div class="lg:col-span-7 bg-white p-6 rounded-xl shadow-lg">
             <h1 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-4">AI SOP Generator</h1>
             
@@ -264,7 +266,6 @@
                         </div>
                         <div>
                             <label class="form-label">Konteks Tambahan dari File (Opsional)</label>
-                            <!-- FILE UPLOAD SECTION -->
                             <div class="bg-white p-3 border border-dashed rounded-lg">
                                 <input type="file" id="file-upload-input" class="block w-full text-sm text-slate-500
                                   file:mr-4 file:py-2 file:px-4
@@ -303,8 +304,7 @@
                 <fieldset class="border border-gray-200 p-4 rounded-lg">
                     <legend class="px-2 font-semibold text-gray-700 text-lg">3. Riwayat Revisi Dokumen</legend>
                     <div id="revisi-list" class="space-y-4 mt-4">
-                        <!-- Revision items will be injected here by JavaScript -->
-                    </div>
+                        </div>
                     <button type="button" id="add-revisi-btn" class="add-btn text-sm mt-4"><i class="fas fa-plus mr-1"></i> Tambah Riwayat Revisi</button>
                 </fieldset>
 
@@ -336,18 +336,29 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     try {
-        // Lingkungan Canvas menyediakan API key secara otomatis
-        const apiKey = "";
-        let listCounters = { alat: 0, petugas: 0, langkah: 0, revisi: 0 };
+        // --- 1. INTEGRASI API KEY & DASHBOARD ---
+        const urlParams = new URLSearchParams(window.location.search);
+        let apiKey = urlParams.get('key') || "";
+        
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'UPDATE_API_KEY') {
+                apiKey = event.data.key;
+                console.log("SOP: Menerima API Key baru dari Dashboard.");
+            }
+        });
 
+        if (!apiKey && window.parent !== window) {
+            window.parent.postMessage({ type: 'REQUEST_API_KEY' }, '*');
+        }
+
+        let listCounters = { alat: 0, petugas: 0, langkah: 0, revisi: 0 };
         const aiErrorEl = document.getElementById('ai-error');
         
-        // Setup PDF.js worker
         if (window.pdfjsLib) {
             pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
         }
 
-        // --- FILE READER ---
+        // --- 2. FILE READER ---
         document.getElementById('file-upload-input').addEventListener('change', async (event) => {
             const file = event.target.files[0];
             if (!file) return;
@@ -357,11 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const setInfo = (message, type) => {
                 infoEl.textContent = message;
-                const colors = {
-                    info: 'text-amber-600',
-                    success: 'text-green-600',
-                    error: 'text-red-600'
-                };
+                const colors = { info: 'text-amber-600', success: 'text-green-600', error: 'text-red-600' };
                 infoEl.className = `text-xs mt-2 ${colors[type] || 'text-gray-500'}`;
             };
 
@@ -401,6 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        // --- 3. MANAJEMEN LIST (ALAT, PETUGAS, LANGKAH) ---
         function updateStepNumbers() {
             const stepItems = document.querySelectorAll('#langkah-list .step-number');
             stepItems.forEach((span, index) => { span.textContent = `${index + 1}.`; });
@@ -498,18 +506,26 @@ document.addEventListener('DOMContentLoaded', () => {
         
         document.getElementById('add-revisi-btn').addEventListener('click', () => addRevisionItem());
 
-        // Helper untuk melakukan API request dengan Exponential Backoff
+        // --- 4. INTEGRASI GENERASI AI DENGAN ROTASI ERROR 429 ---
         async function fetchWithBackoff(url, options, maxRetries = 5) {
             const delays = [1000, 2000, 4000, 8000, 16000];
             for (let i = 0; i < maxRetries; i++) {
                 try {
                     const response = await fetch(url, options);
                     if (!response.ok) {
+                        // Jika kode 429 (Too Many Requests), lempar error khusus ke Dashboard
+                        if (response.status === 429) {
+                             if (window.parent !== window) {
+                                  window.parent.postMessage({ type: 'API_ERROR', code: 429 }, '*');
+                             }
+                             throw new Error("QUOTA_EXCEEDED");
+                        }
                         const errorData = await response.json().catch(() => ({}));
                         throw new Error(errorData?.error?.message || `HTTP error! status: ${response.status}`);
                     }
                     return await response.json();
                 } catch (error) {
+                    if (error.message === "QUOTA_EXCEEDED") throw error; // Berhenti retry jika kuota habis
                     if (i === maxRetries - 1) throw error;
                     await new Promise(res => setTimeout(res, delays[i]));
                 }
@@ -517,6 +533,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         document.getElementById('generate-ai-btn').addEventListener('click', async () => {
+            if (!apiKey) {
+                aiErrorEl.innerHTML = `<strong>Akses Ditolak:</strong> API Key tidak ditemukan. Harap pastikan Anda membuka aplikasi ini dari dalam Dashboard SEHATI dan mengisi Slot API Key.`;
+                aiErrorEl.classList.remove('hidden');
+                return;
+            }
+
             const sopTitle = document.getElementById('sop-title').value.trim();
             if (!sopTitle) { 
                 aiErrorEl.textContent = 'Judul SOP wajib diisi untuk menggunakan AI.'; 
@@ -541,10 +563,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 const payload = { contents: [{ role: "user", parts: [{ text: basePrompt }] }], generationConfig: { responseMimeType: "application/json" } };
-                // Memperbarui URL API untuk menggunakan model yang didukung di lingkungan preview
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
                 
-                // Menggunakan fungsi fetch dengan retry mechanism
                 const result = await fetchWithBackoff(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 
                 if (!result.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("Respons AI tidak valid atau kosong.");
@@ -563,7 +583,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } catch (error) {
                 console.error(`AI Generation failed:`, error);
-                aiErrorEl.innerHTML = `Gagal menghubungi AI: ${error.message}<br>Coba lagi dalam beberapa saat.`;
+                if (error.message === "QUOTA_EXCEEDED") {
+                    aiErrorEl.innerHTML = `<strong>Sistem Sedang Mengganti Kunci:</strong> Kuota API Key ini habis. Kunci cadangan telah diminta dari Dashboard... <br><br><em>Silakan klik tombol <strong>"Hasilkan Draf dengan AI"</strong> sekali lagi untuk melanjutkan.</em>`;
+                } else {
+                    aiErrorEl.innerHTML = `Gagal menghubungi AI: ${error.message}<br>Coba lagi dalam beberapa saat.`;
+                }
                 aiErrorEl.classList.remove('hidden');
             } finally {
                 btn.disabled = false;
@@ -572,6 +596,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        // --- 5. FUNGSI SIMPAN, MUAT, PRATINJAU & PDF ---
         function collectAllData() {
             return {
                 fasyankes: document.getElementById('fasyankes').value, kepala: document.getElementById('kepala').value, judul: document.getElementById('sop-title').value, noDokumen: document.getElementById('no-dokumen').value, noRevisi: document.getElementById('no-revisi').value, tglTerbit: document.getElementById('tgl-terbit').value, pengertian: document.getElementById('sop-pengertian').value, tujuan: document.getElementById('sop-tujuan').value, kebijakan: document.getElementById('sop-kebijakan').value, referensi: document.getElementById('sop-referensi').value, perhatian: document.getElementById('sop-perhatian').value, unitTerkait: document.getElementById('sop-unit-terkait').value, dokumenTerkait: document.getElementById('sop-dokumen-terkait').value,
@@ -636,10 +661,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         async function downloadPDF() {
-            // Karena lingkungan Canvas memblokir window.print() langsung,
-            // kita buka pratinjau di tab baru untuk dicetak/di-save sebagai PDF Teks.
             renderPreview();
-            
             const btnText = document.getElementById('pdf-btn-text');
             const originalText = btnText.textContent;
             btnText.textContent = 'Membuka Tab Cetak...';
@@ -694,7 +716,6 @@ document.addEventListener('DOMContentLoaded', () => {
 </body>
 </html>`;
 
-                // Buat file HTML virtual dan buka di tab baru
                 const blob = new Blob([htmlTemplate], { type: 'text/html' });
                 const url = URL.createObjectURL(blob);
                 
@@ -714,12 +735,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Attach all event listeners
         document.getElementById('save-btn').addEventListener('click', saveSOP);
         document.getElementById('preview-btn').addEventListener('click', renderPreview);
         document.getElementById('download-pdf-btn').addEventListener('click', downloadPDF);
 
-        // Initialize the application
         loadSOP();
         if (document.querySelectorAll('#langkah-list > div').length === 0) addListItem('langkah');
         if (document.querySelectorAll('#alat-list > div').length === 0) addListItem('alat');
