@@ -11,7 +11,6 @@
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.5.1/mammoth.browser.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
@@ -203,7 +202,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             
-            // Pop-up notifikasi yang ramah pengguna ketika seluruh AI Gagal
             if (event.data && event.data.type === 'STOP_RETRY') {
                 isWaitingForRetry = false;
                 const btn = document.getElementById('generate-ai-btn');
@@ -218,7 +216,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 aiErrorEl.innerHTML = `<strong>Siklus Dihentikan:</strong> Seluruh API Key dan Model AI gagal memproses. Kemungkinan kuota harian telah habis.`;
                 aiErrorEl.classList.remove('hidden');
 
-                // Jeda 500ms agar tombol kembali dulu, lalu munculkan Pop-up
                 setTimeout(() => {
                     const cobaLagi = confirm("Sistem telah mencoba semua Slot API Key dan Model AI secara otomatis, namun semuanya kehabisan kuota atau gagal.\n\nApakah Anda ingin mencoba memproses ulang dari awal?");
                     if (cobaLagi) {
@@ -450,6 +447,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const instansi = document.getElementById('fasyankes').value || jenisFasyankes;
 
                 let basePrompt = `Anda adalah seorang ahli dalam membuat Standar Operasional Prosedur (SOP) untuk ${jenisFasyankes} di Indonesia. Berdasarkan judul SOP: "${sopTitle}" untuk instansi ${instansi}, buatkan konten dalam format JSON. PENTING: Untuk bagian "langkah_langkah", setiap kalimat WAJIB mengikuti pola kalimat aktif SPO(K). Jika ada titik keputusan, GUNAKAN FORMAT KHUSUS berikut dalam satu string: "KEPUTUSAN: [Pertanyaan]? | YA: [Tindakan jika ya] | TIDAK: [Tindakan jika tidak]". Contoh: "KEPUTUSAN: Apakah ada darah dalam spuit? | YA: Petugas menarik kembali jarum dari kulit. | TIDAK: Petugas memasukkan obat secara perlahan.". Struktur JSON: { "pengertian": "...", "tujuan": "...", "kebijakan": "...", "referensi": ["..."], "prosedur": { "alat_bahan": ["..."], "petugas": ["..."], "langkah_langkah": ["Langkah 1 (SPOK)", "KEPUTUSAN: ...", "Langkah 3 (SPOK)"] }, "perhatian": "...", "unit_terkait": ["..."], "dokumen_terkait": ["..."] }`;
+
+                // --- SUNTIKAN PERSEPSI DINKES ---
+                if (jenisFasyankes === "Dinas Kesehatan") {
+                    basePrompt += `\n\nATURAN MUTLAK DINKES: Karena instansi ini adalah Dinas Kesehatan, SOP ini BUKAN prosedur medis/asuhan klinis ke pasien langsung. SOP ini HARUS berfokus pada Tata Kelola Pemerintahan, Administrasi, Pembinaan, Monitoring, Evaluasi data/informasi, atau Regulasi kewilayahan. Petugas yang terlibat adalah staf dinkes/pengelola program, bukan perawat/dokter klinis.`;
+                }
 
                 if (sopContext) {
                     basePrompt += `\n\nSebagai tambahan, gunakan informasi dari teks berikut sebagai referensi utama dalam membuat konten SOP. Analisis teks ini dan ekstrak informasi yang relevan untuk setiap bagian dari SOP (pengertian, tujuan, langkah-langkah, dll.): \n\n--- KONTEKS TAMBAHAN DARI PENGGUNA ---\n${sopContext}\n--- AKHIR KONTEKS ---`;
