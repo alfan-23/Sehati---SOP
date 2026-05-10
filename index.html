@@ -189,6 +189,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         
+        // Pengecekan Tab Baru (Standalone) & Inisialisasi API Key
+        if (window.parent === window) {
+            try {
+                const savedKeys = JSON.parse(localStorage.getItem('sehati_api_keys') || "[]").filter(k => k.trim() !== "");
+                if (savedKeys.length > 0) {
+                    apiKey = savedKeys[0];
+                    if (!currentModel) currentModel = 'gemini-1.5-flash'; 
+                    console.log("Berhasil mengambil API Key dari memori browser!");
+                } else {
+                    const aiErrorEl = document.getElementById('ai-error');
+                    aiErrorEl.innerHTML = `<strong>Akses AI Tertunda:</strong> API Key tidak ditemukan. Buka tab <strong>Dashboard</strong> terlebih dahulu, isi API Key, centang <strong>"Simpan di Browser"</strong>, lalu Muat Ulang (Refresh) halaman ini.`;
+                    aiErrorEl.classList.remove('hidden');
+                }
+            } catch (e) {
+                console.error("Gagal membaca memori browser.");
+            }
+        } else {
+            window.parent.postMessage({ type: 'REQUEST_CONFIG' }, '*');
+        }
+
         window.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'UPDATE_CONFIG') {
                 apiKey = event.data.key;
@@ -225,15 +245,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }, 500);
             }
         });
-
-        // Cek apakah dibuka di luar Dashboard (tidak ada window parent)
-        if (window.parent === window) {
-            const aiErrorEl = document.getElementById('ai-error');
-            aiErrorEl.innerHTML = `<strong>Akses Ditolak:</strong> Aplikasi harus dijalankan dari Dashboard Utama.`;
-            aiErrorEl.classList.remove('hidden');
-        } else {
-            window.parent.postMessage({ type: 'REQUEST_CONFIG' }, '*');
-        }
 
         let listCounters = { alat: 0, petugas: 0, langkah: 0, revisi: 0 };
         const aiErrorEl = document.getElementById('ai-error');
@@ -393,33 +404,71 @@ document.addEventListener('DOMContentLoaded', () => {
         
         document.getElementById('add-revisi-btn').addEventListener('click', () => addRevisionItem());
 
-        async function fetchWithBackoff(url, options, maxRetries = 5) {
-            const delays = [1000, 2000, 4000, 8000, 16000];
-            for (let i = 0; i < maxRetries; i++) {
+        // FUNGSI PUSAT PANGGILAN AI (DENGAN ROTASI STANDALONE)
+        async function callGemini(payload) {
+            if (!apiKey || !currentModel) {
+                throw new Error("Konfigurasi Sistem Belum Ditemukan.");
+            }
+
+            for (let retry = 0; retry < 5; retry++) {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
                 try {
-                    const response = await fetch(url, options);
-                    if (!response.ok) {
-                        if (response.status === 429 || response.status === 404 || response.status === 403 || response.status >= 500) {
-                             if (window.parent !== window) {
-                                  window.parent.postMessage({ type: 'API_ERROR', code: response.status }, '*');
-                             }
-                             throw new Error("API_FAIL_ROTATE");
+                    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    
+                    if (!res.ok) {
+                        if (res.status === 429 || res.status === 404 || res.status === 403 || res.status >= 500) {
+                            if (window.parent !== window) {
+                                window.parent.postMessage({ type: 'API_ERROR', code: res.status }, '*');
+                            } else {
+                                // ROTASI LOKAL (STANDALONE)
+                                const savedKeys = JSON.parse(localStorage.getItem('sehati_api_keys') || "[]").filter(k => k.trim() !== "");
+                                const localModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
+                                
+                                if (savedKeys.length > 0) {
+                                    let currKeyIdx = savedKeys.indexOf(apiKey);
+                                    let currModIdx = localModels.indexOf(currentModel);
+                                    
+                                    currKeyIdx++;
+                                    if (currKeyIdx >= savedKeys.length) {
+                                        currKeyIdx = 0;
+                                        currModIdx++;
+                                    }
+                                    
+                                    if (currModIdx >= localModels.length) {
+                                        throw new Error("KUOTA_HABIS_TOTAL");
+                                    }
+                                    
+                                    apiKey = savedKeys[currKeyIdx];
+                                    currentModel = localModels[currModIdx];
+                                    console.log(`Rotasi Lokal Aktif: Key Slot ${currKeyIdx + 1}, Model ${currentModel}`);
+                                }
+                            }
+                            throw new Error("API_FAIL_ROTATE");
                         }
-                        const errorData = await response.json().catch(() => ({}));
-                        throw new Error(errorData?.error?.message || `HTTP error! status: ${response.status}`);
+                        const errorData = await res.json().catch(() => ({}));
+                        throw new Error(`Koneksi Tertolak: ${errorData.error?.message || res.status}`);
                     }
-                    return await response.json();
-                } catch (error) {
-                    if (error.message === "API_FAIL_ROTATE") throw error; 
-                    if (i === maxRetries - 1) throw error;
-                    await new Promise(res => setTimeout(res, delays[i]));
+                    
+                    const data = await res.json();
+                    let textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (!textResponse) throw new Error("Respons kosong dari AI.");
+                    
+                    if (window.parent !== window) {
+                        window.parent.postMessage({ type: 'API_SUCCESS' }, '*');
+                    }
+                    
+                    return JSON.parse(textResponse);
+                } catch(e) {
+                    if (e.message === "API_FAIL_ROTATE" || e.message === "KUOTA_HABIS_TOTAL") throw e; 
+                    if (retry === 4) throw e;
+                    await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retry))); 
                 }
             }
         }
 
         async function runAIGeneration() {
             if (!apiKey || !currentModel) {
-                aiErrorEl.innerHTML = `<strong>Akses Ditolak:</strong> Sistem menunggu konfigurasi aman dari Dashboard Utama.`;
+                aiErrorEl.innerHTML = `<strong>Akses Ditolak:</strong> Sistem belum mendeteksi API Key. Buka Dashboard, isi API Key di Slot 1, centang "Simpan di Browser", lalu Muat Ulang halaman ini.`;
                 aiErrorEl.classList.remove('hidden');
                 return;
             }
@@ -448,7 +497,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 let basePrompt = `Anda adalah seorang ahli dalam membuat Standar Operasional Prosedur (SOP) untuk ${jenisFasyankes} di Indonesia. Berdasarkan judul SOP: "${sopTitle}" untuk instansi ${instansi}, buatkan konten dalam format JSON. PENTING: Untuk bagian "langkah_langkah", setiap kalimat WAJIB mengikuti pola kalimat aktif SPO(K). Jika ada titik keputusan, GUNAKAN FORMAT KHUSUS berikut dalam satu string: "KEPUTUSAN: [Pertanyaan]? | YA: [Tindakan jika ya] | TIDAK: [Tindakan jika tidak]". Contoh: "KEPUTUSAN: Apakah ada darah dalam spuit? | YA: Petugas menarik kembali jarum dari kulit. | TIDAK: Petugas memasukkan obat secara perlahan.". Struktur JSON: { "pengertian": "...", "tujuan": "...", "kebijakan": "...", "referensi": ["..."], "prosedur": { "alat_bahan": ["..."], "petugas": ["..."], "langkah_langkah": ["Langkah 1 (SPOK)", "KEPUTUSAN: ...", "Langkah 3 (SPOK)"] }, "perhatian": "...", "unit_terkait": ["..."], "dokumen_terkait": ["..."] }`;
 
-                // --- SUNTIKAN PERSEPSI DINKES ---
                 if (jenisFasyankes === "Dinas Kesehatan") {
                     basePrompt += `\n\nATURAN MUTLAK DINKES: Karena instansi ini adalah Dinas Kesehatan, SOP ini BUKAN prosedur medis/asuhan klinis ke pasien langsung. SOP ini HARUS berfokus pada Tata Kelola Pemerintahan, Administrasi, Pembinaan, Monitoring, Evaluasi data/informasi, atau Regulasi kewilayahan. Petugas yang terlibat adalah staf dinkes/pengelola program, bukan perawat/dokter klinis.`;
                 }
@@ -458,13 +506,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 const payload = { contents: [{ role: "user", parts: [{ text: basePrompt }] }], generationConfig: { responseMimeType: "application/json" } };
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
                 
-                const result = await fetchWithBackoff(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const data = await callGemini(payload);
                 
-                if (!result.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("Respons AI tidak valid atau kosong.");
-                
-                const data = JSON.parse(result.candidates[0].content.parts[0].text);
+                // === PEMBERSIH NUMBERING OTOMATIS ===
+                const stripPrefix = (arr) => (arr || []).map(item => {
+                    if (typeof item === 'string' && !item.startsWith('KEPUTUSAN:')) {
+                        return item.replace(/^([a-z]|\d+)\s*[\.\)-]\s*/i, '').trim();
+                    }
+                    return item;
+                });
                 
                 document.getElementById('sop-pengertian').value = data.pengertian || '';
                 document.getElementById('sop-tujuan').value = data.tujuan || '';
@@ -473,13 +524,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('sop-perhatian').value = data.perhatian || '';
                 document.getElementById('sop-unit-terkait').value = (data.unit_terkait || []).join(', ');
                 document.getElementById('sop-dokumen-terkait').value = (data.dokumen_terkait || []).join(', ');
-                populateList('alat', data.prosedur?.alat_bahan);
-                populateList('petugas', data.prosedur?.petugas);
-                populateList('langkah', data.prosedur?.langkah_langkah);
-
-                if (window.parent !== window) {
-                    window.parent.postMessage({ type: 'API_SUCCESS' }, '*');
-                }
+                
+                populateList('alat', stripPrefix(data.prosedur?.alat_bahan));
+                populateList('petugas', stripPrefix(data.prosedur?.petugas));
+                populateList('langkah', stripPrefix(data.prosedur?.langkah_langkah));
 
                 btn.disabled = false;
                 btnText.textContent = 'Hasilkan Draf dengan AI';
@@ -489,9 +537,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error(`AI Generation failed:`, error);
                 
                 if (error.message === "API_FAIL_ROTATE") {
-                    aiErrorEl.innerHTML = `<strong>Siklus Otomatis:</strong> Mengganti ke API Key/Model berikutnya dan mencoba ulang... <i class="fas fa-circle-notch fa-spin ml-2"></i>`;
+                    aiErrorEl.innerHTML = `<strong>Siklus Otomatis:</strong> Limit tercapai. Beralih ke Slot/Model selanjutnya... <i class="fas fa-circle-notch fa-spin ml-2"></i>`;
                     aiErrorEl.classList.remove('hidden');
-                    isWaitingForRetry = true; 
+                    
+                    if (window.parent === window) {
+                        setTimeout(() => runAIGeneration(), 1500); // Retry Standalone
+                    } else {
+                        isWaitingForRetry = true; // Wait for Dashboard
+                    }
+                } else if (error.message === "KUOTA_HABIS_TOTAL") {
+                    aiErrorEl.innerHTML = `<strong>Siklus Terhenti:</strong> Seluruh Slot API Key dan Model AI telah kehabisan kuota harian.`;
+                    aiErrorEl.classList.remove('hidden');
+                    
+                    btn.disabled = false;
+                    btnText.textContent = 'Hasilkan Draf dengan AI';
+                    btnIcon.className = 'fas fa-magic';
                 } else {
                     aiErrorEl.innerHTML = `Gagal menghubungi AI: ${error.message}<br>Coba lagi dalam beberapa saat.`;
                     aiErrorEl.classList.remove('hidden');
